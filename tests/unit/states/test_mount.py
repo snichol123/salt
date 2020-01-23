@@ -51,6 +51,12 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
         superopts3 = ['uid=510', 'gid=100', 'username=jfs2user',
                       'domain=jfs2sdomain']
 
+        name4 = os.path.realpath('/mnt/c0t0d0')
+        device4 = os.path.realpath('/dev/c0t0d0')
+        fstype4 = 'ufs'
+        opts4 = ['']
+        superopts4 = ['uid=510', 'gid=100', 'username=ufsuser']
+
         ret = {'name': name,
                'result': False,
                'comment': '',
@@ -66,7 +72,9 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
                                            name2: {'device': device2, 'opts': opts2,
                                                    'superopts': superopts2},
                                            name3: {'device': device3, 'opts': opts3,
-                                                   'superopts': superopts3}})
+                                                   'superopts': superopts3},
+                                           name4: {'device': device4, 'opts': opts4,
+                                                   'superopts': superopts4}})
         mock_aixfs_retn = MagicMock(return_value='present')
 
         mock_emt = MagicMock(return_value={})
@@ -75,7 +83,7 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
         mock_group = MagicMock(return_value={'gid': 100})
         mock_read_cache = MagicMock(return_value={})
         mock_write_cache = MagicMock(return_value=True)
-        with patch.dict(mount.__grains__, {'os': 'Darwin'}):
+        with patch.dict(mount.__grains__, {'os': 'Darwin', 'kernel': 'Darwin'}):
             with patch.dict(mount.__salt__, {'mount.active': mock_mnt,
                                              'cmd.run_all': mock_ret,
                                              'mount.umount': mock_f}), \
@@ -178,7 +186,7 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
                                                            mount=False), ret)
 
         # Test no change for uid provided as a name #25293
-        with patch.dict(mount.__grains__, {'os': 'CentOS'}):
+        with patch.dict(mount.__grains__, {'os': 'CentOS', 'kernel': 'CentOS'}):
             with patch.dict(mount.__salt__, {'mount.active': mock_mnt,
                                              'mount.mount': mock_str,
                                              'mount.umount': mock_f,
@@ -198,7 +206,27 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
                                                                  'gid=group1']),
                                              ret)
 
-        with patch.dict(mount.__grains__, {'os': 'AIX'}):
+        with patch.dict(mount.__grains__, {'os': 'Oracle Solaris', 'kernel': 'SunOS'}):
+            with patch.dict(mount.__salt__, {'mount.active': mock_mnt,
+                                             'mount.mount': mock_str,
+                                             'mount.umount': mock_f,
+                                             'mount.read_mount_cache': mock_read_cache,
+                                             'mount.write_mount_cache': mock_write_cache,
+                                             'mount.set_vfstab': mock,
+                                             'user.info': mock_user,
+                                             'group.info': mock_group}):
+                with patch.dict(mount.__opts__, {'test': True}):
+                    with patch.object(os.path, 'exists', mock_t):
+                        comt = 'Target was already mounted. Entry already exists in the fstab.'
+                        ret.update({'name': name4, 'result': True})
+                        ret.update({'comment': comt, 'changes': {}})
+                        self.assertDictEqual(mount.mounted(name4, device4,
+                                                           fstype4,
+                                                           opts=['uid=user1',
+                                                                 'gid=group1']),
+                                             ret)
+
+        with patch.dict(mount.__grains__, {'os': 'AIX', 'kernel': 'AIX'}):
             with patch.dict(mount.__salt__, {'mount.active': mock_mnt,
                                              'mount.mount': mock_str,
                                              'mount.umount': mock_f,
@@ -236,14 +264,12 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
         mock_swp = MagicMock(return_value=[name])
         mock_fs = MagicMock(return_value={'none': {'device': name,
                                                    'fstype': 'xfs'}})
-        mock_fs_diff = MagicMock(return_value={'none': {'device': 'something_else',
-                                               'fstype': 'xfs'}})
         mock_aixfs = MagicMock(return_value={name: {'dev': name,
                                                    'fstype': 'jfs2'}})
         mock_emt = MagicMock(return_value={})
-        with patch.dict(mount.__grains__, {'os': 'test'}):
+        with patch.dict(mount.__grains__, {'os': 'test', 'kernel': 'test'}):
             with patch.dict(mount.__salt__, {'mount.swaps': mock_swp,
-                                             'mount.fstab': mock_fs_diff,
+                                             'mount.fstab': mock_fs,
                                              'file.is_link': mock_f}):
                 with patch.dict(mount.__opts__, {'test': True}):
                     comt = ('Swap {0} is set to be added to the '
@@ -254,51 +280,6 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
                 with patch.dict(mount.__opts__, {'test': False}):
                     comt = ('Swap {0} already active'.format(name))
                     ret.update({'comment': comt, 'result': True})
-                    self.assertDictEqual(mount.swap(name, persist=False), ret)
-
-                    with patch.dict(mount.__salt__, {'mount.fstab': mock_emt,
-                                                     'mount.set_fstab': mock}):
-                        comt = ('Swap {0} already active'.format(name))
-                        ret.update({'comment': comt, 'result': True})
-                        self.assertDictEqual(mount.swap(name), ret)
-
-                        comt = ('Swap /mnt/sdb already active. '
-                                'Added new entry to the fstab.')
-                        ret.update({'comment': comt, 'result': True,
-                                    'changes': {'persist': 'new'}})
-                        self.assertDictEqual(mount.swap(name), ret)
-
-                        comt = ('Swap /mnt/sdb already active. '
-                                'Updated the entry in the fstab.')
-                        ret.update({'comment': comt, 'result': True,
-                                    'changes': {'persist': 'update'}})
-                        self.assertDictEqual(mount.swap(name), ret)
-
-                        comt = ('Swap /mnt/sdb already active. '
-                                'However, the fstab was not found.')
-                        ret.update({'comment': comt, 'result': False,
-                                    'changes': {}})
-                        self.assertDictEqual(mount.swap(name), ret)
-
-        ret = {'name': name,
-               'result': None,
-               'comment': '',
-               'changes': {}}
-
-        mock = MagicMock(side_effect=['present', 'new', 'change', 'bad config'])
-        mock_emt = MagicMock(return_value={})
-        with patch.dict(mount.__grains__, {'os': 'test'}):
-            with patch.dict(mount.__salt__, {'mount.swaps': mock_swp,
-                                             'mount.fstab': mock_fs,
-                                             'file.is_link': mock_f}):
-                with patch.dict(mount.__opts__, {'test': True}):
-                    comt = ('Swap {0} already active'.format(name))
-                    ret.update({'comment': comt, 'result': True})
-                    self.assertDictEqual(mount.swap(name), ret)
-
-                with patch.dict(mount.__opts__, {'test': False}):
-                    comt = ('Swap {0} already active'.format(name))
-                    ret.update({'comment': comt, 'result': True})
                     self.assertDictEqual(mount.swap(name), ret)
 
                     with patch.dict(mount.__salt__, {'mount.fstab': mock_emt,
@@ -325,7 +306,7 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
                                     'changes': {}})
                         self.assertDictEqual(mount.swap(name), ret)
 
-        with patch.dict(mount.__grains__, {'os': 'AIX'}):
+        with patch.dict(mount.__grains__, {'os': 'AIX', 'kernel': 'AIX'}):
             with patch.dict(mount.__salt__, {'mount.swaps': mock_swp,
                                              'mount.filesystems': mock_aixfs,
                                              'file.is_link': mock_f}):
@@ -378,7 +359,7 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
         comt3 = ('Mount point /mnt/sdb is unmounted but needs to be purged '
                  'from /etc/auto_salt to be made persistent')
 
-        with patch.dict(mount.__grains__, {'os': 'Darwin'}):
+        with patch.dict(mount.__grains__, {'os': 'Darwin', 'kernel': 'Darwin'}):
             with patch.dict(mount.__salt__, {'mount.active': mock_mnt,
                                              'mount.automaster': mock_fs,
                                              'file.is_link': mock_f}):
@@ -404,7 +385,7 @@ class MountTestCase(TestCase, LoaderModuleMockMixin):
                     ret.update({'comment': comt, 'result': True})
                     self.assertDictEqual(mount.unmounted(name, device), ret)
 
-        with patch.dict(mount.__grains__, {'os': 'AIX'}):
+        with patch.dict(mount.__grains__, {'os': 'AIX', 'kernel': 'AIX'}):
             with patch.dict(mount.__salt__, {'mount.active': mock_mnta,
                                              'mount.filesystems': mock_aixfs,
                                              'file.is_link': mock_f}):

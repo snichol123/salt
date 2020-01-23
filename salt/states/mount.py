@@ -61,6 +61,9 @@ def _size_convert(_re_size):
 def mounted(name,
             device,
             fstype,
+            device_fsck='-',
+            pass_fsck='-',
+            mount_at_boot='yes',
             mkmnt=False,
             opts='defaults',
             dump=0,
@@ -198,21 +201,6 @@ def mounted(name,
            'comment': ''}
 
     update_mount_cache = False
-
-    if not name:
-        ret['result'] = False
-        ret['comment'] = 'Must provide name to mount.mounted'
-        return ret
-
-    if not device:
-        ret['result'] = False
-        ret['comment'] = 'Must provide device to mount.mounted'
-        return ret
-
-    if not fstype:
-        ret['result'] = False
-        ret['comment'] = 'Must provide fstype to mount.mounted'
-        return ret
 
     if device_name_regex is None:
         device_name_regex = []
@@ -515,16 +503,16 @@ def mounted(name,
                         if re.match(regex, _device):
                             _device_mismatch_is_ignored = _device
                             break
-                if _device_mismatch_is_ignored:
-                    ret['result'] = True
-                    ret['comment'] = "An umount will not be forced " \
-                                     + "because device matched device_name_regex: " \
-                                     + _device_mismatch_is_ignored
-                elif __opts__['test']:
+                if __opts__['test']:
                     ret['result'] = None
                     ret['comment'] = "An umount would have been forced " \
                                      + "because devices do not match.  Watched: " \
                                      + device
+                elif _device_mismatch_is_ignored:
+                    ret['result'] = True
+                    ret['comment'] = "An umount will not be forced " \
+                                     + "because device matched device_name_regex: " \
+                                     + _device_mismatch_is_ignored
                 else:
                     ret['changes']['umount'] = "Forced unmount because devices " \
                                                + "don't match. Wanted: " + device
@@ -600,14 +588,18 @@ def mounted(name,
             elif 'AIX' in __grains__['os']:
                 config = "/etc/filesystems"
 
+            # Override default for SunOS
+            elif 'SunOS' in __grains__['kernel']:
+                config = "/etc/vfstab"
+
         if __opts__['test']:
             if __grains__['os'] in ['MacOS', 'Darwin']:
                 out = __salt__['mount.set_automaster'](name,
-                                                       device,
-                                                       fstype,
-                                                       opts,
-                                                       config,
-                                                       test=True)
+                                              device,
+                                              fstype,
+                                              opts,
+                                              config,
+                                              test=True)
             elif __grains__['os'] in ['AIX']:
                 out = __salt__['mount.set_filesystems'](name,
                                                   device,
@@ -661,16 +653,26 @@ def mounted(name,
         else:
             if __grains__['os'] in ['MacOS', 'Darwin']:
                 out = __salt__['mount.set_automaster'](name,
-                                                       device,
-                                                       fstype,
-                                                       opts,
-                                                       config)
+                                              device,
+                                              fstype,
+                                              opts,
+                                              config)
             elif __grains__['os'] in ['AIX']:
                 out = __salt__['mount.set_filesystems'](name,
                                                   device,
                                                   fstype,
                                                   opts,
                                                   mount,
+                                                  config,
+                                                  match_on=match_on)
+            elif __grains__['kernel'] == 'SunOS':
+                out = __salt__['mount.set_vfstab'](name,
+                                                  device,
+                                                  fstype,
+                                                  opts,
+                                                  device_fsck,
+                                                  pass_fsck,
+                                                  mount_at_boot,
                                                   config,
                                                   match_on=match_on)
             else:
@@ -764,7 +766,7 @@ def swap(name, persist=True, config='/etc/fstab'):
         else:
             fstab_data = __salt__['mount.fstab'](config)
         if __opts__['test']:
-            if name not in fstab_data and name not in [fstab_data[item]['device'] for item in fstab_data]:
+            if name not in fstab_data:
                 ret['result'] = None
                 if name in on_:
                     ret['comment'] = ('Swap {0} is set to be added to the '
@@ -844,11 +846,6 @@ def unmounted(name,
            'comment': ''}
 
     update_mount_cache = False
-
-    if not name:
-        ret['result'] = False
-        ret['comment'] = 'Must provide name to mount.unmounted'
-        return ret
 
     # Get the active data
     active = __salt__['mount.active'](extended=True)
@@ -930,12 +927,6 @@ def unmounted(name,
 def mod_watch(name, user=None, **kwargs):
     '''
     The mounted watcher, called to invoke the watch command.
-
-    .. note::
-        This state exists to support special handling of the ``watch``
-        :ref:`requisite <requisites>`. It should not be called directly.
-
-        Parameters for this function should be set by the state being triggered.
 
     name
         The name of the mount point
