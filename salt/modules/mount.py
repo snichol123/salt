@@ -63,9 +63,7 @@ def _active_mountinfo(ret):
         msg = 'File not readable {0}'
         raise CommandExecutionError(msg.format(filename))
 
-    if 'disk.blkid' not in __context__:
-        __context__['disk.blkid'] = __salt__['disk.blkid']()
-    blkid_info = __context__['disk.blkid']
+    blkid_info = __salt__['disk.blkid']()
 
     with salt.utils.files.fopen(filename) as ifile:
         for line in ifile:
@@ -173,6 +171,20 @@ def _active_mounts_solaris(ret):
         ret[comps[2]] = {'device': comps[0],
                          'fstype': comps[4],
                          'opts': _resolve_user_group_names(comps[5].split('/'))}
+
+        if ret[comps[2]].get('fstype') == 'nfs':
+            if 'write' in ret[comps[2]].get('opts') and 'read' in ret[comps[2]].get('opts'):
+                opts = ret[comps[2]].get('opts')
+                opts.remove('read')
+                opts.remove('write')
+                opts.append('rw')
+                ret[comps[2]].update({'opts': opts})
+            elif 'read-only' in ret[comps[2]].get('opts'):
+                opts = ret[comps[2]].get('opts')
+                opts.remove('read-only')
+                opts.append('ro')
+                ret[comps[2]].update({'opts': opts})
+        
     return ret
 
 
@@ -228,7 +240,6 @@ def _resolve_user_group_names(opts):
                 if _info and _param in _info:
                     _id = _info[_param]
             opts[ind] = _param + '=' + six.text_type(_id)
-        opts[ind] = opts[ind].replace('\\040', '\\ ')
     return opts
 
 
@@ -293,10 +304,8 @@ class _fstab_entry(object):
             raise cls.ParseError("Comment!")
 
         comps = line.split()
-        if len(comps) < 4 or len(comps) > 6:
+        if len(comps) != 6:
             raise cls.ParseError("Invalid Entry!")
-
-        comps.extend(['0'] * (len(keys) - len(comps)))
 
         return dict(zip(keys, comps))
 
@@ -732,7 +741,7 @@ def set_fstab(
         'name': name,
         'device': device.replace('\\ ', '\\040'),
         'fstype': fstype,
-        'opts': opts.replace('\\ ', '\\040'),
+        'opts': opts,
         'dump': dump,
         'pass_num': pass_num,
     }
@@ -1217,6 +1226,9 @@ def mount(name, device, mkmnt=False, fstype='', opts='defaults', user=None, util
     if 'AIX' in __grains__['os']:
         if fstype:
             args += ' -v {0}'.format(fstype)
+    elif 'solaris' in __grains__['os'].lower():
+        if fstype:
+            args += ' -F {0}'.format(fstype)
     else:
         args += ' -t {0}'.format(fstype)
     cmd = 'mount {0} {1} {2} '.format(args, device, name)
