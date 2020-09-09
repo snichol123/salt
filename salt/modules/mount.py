@@ -164,7 +164,7 @@ def _active_mounts_freebsd(ret):
 
 def _active_mounts_solaris(ret):
     '''
-    List active mounts on Solaris systems
+    List active mounts on Solaris systems.
     '''
     for line in __salt__['cmd.run_stdout']('mount -v').split('\n'):
         comps = re.sub(r"\s+", " ", line).split()
